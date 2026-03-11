@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import sys
 import numpy as np
 import json
+from datetime import datetime
 
 # ===============================
 # CARREGAR VARIÁVEIS
@@ -132,6 +133,10 @@ for card in data["data"]["allCards"]["edges"]:
 # ===============================
 
 df = pd.DataFrame(rows)
+
+# Adicionar coluna de data/hora de atualização
+data_atualizacao = datetime.now().isoformat()
+df['atualizado_em'] = data_atualizacao
 
 print("Dados extraídos do Pipefy:")
 print(df)

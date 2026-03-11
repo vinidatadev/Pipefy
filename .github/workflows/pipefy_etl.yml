@@ -27,7 +27,7 @@ jobs:
         run: |
           echo "API_KEY=${{ secrets.API_KEY }}" >> .env
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "SUPABASE_API_KEY=${{ secrets.SUPABASE_API_KEY }}" >> .env
 
       - name: Rodar ETL
         run: python script.py

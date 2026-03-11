@@ -185,10 +185,13 @@ headers_supabase = {
 
 print("Enviando para Supabase...")
 
+# Serializar manualmente o JSON para ter controle total
+json_payload = json.dumps(records, ensure_ascii=False)
+
 response = requests.post(
     endpoint,
     headers=headers_supabase,
-    json=records
+    data=json_payload
 )
 
 print("Status:", response.status_code)

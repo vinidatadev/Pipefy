@@ -135,11 +135,18 @@ print("Dados extraídos do Pipefy:")
 print(df)
 
 # 🚨 CORREÇÃO DEFINITIVA DO ERRO JSON
-df = df.replace({pd.NA: None})
+# Substituir todos os valores NaN, NA, inf por None
+import numpy as np
+df = df.replace([np.nan, np.inf, -np.inf], None)
 df = df.where(pd.notnull(df), None)
-df = df.fillna(value=None)
 
 records = df.to_dict(orient="records")
+
+# Garantir que não há valores NaN nos registros
+for record in records:
+    for key, value in record.items():
+        if pd.isna(value) or (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
+            record[key] = None
 
 print("Registros preparados para envio:", len(records))
 

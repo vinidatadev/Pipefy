@@ -3,6 +3,8 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 import sys
+import numpy as np
+import json
 
 # ===============================
 # CARREGAR VARIÁVEIS
@@ -135,20 +137,38 @@ print("Dados extraídos do Pipefy:")
 print(df)
 
 # 🚨 CORREÇÃO DEFINITIVA DO ERRO JSON
-# Substituir todos os valores NaN, NA, inf por None
-import numpy as np
-df = df.replace([np.nan, np.inf, -np.inf], None)
-df = df.where(pd.notnull(df), None)
-
+# Converter para dicionário primeiro
 records = df.to_dict(orient="records")
 
-# Garantir que não há valores NaN nos registros
+# Limpar TODOS os valores problemáticos manualmente
+def clean_value(value):
+    """Remove NaN, inf e outros valores não serializáveis"""
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if np.isnan(value) or np.isinf(value):
+            return None
+    if pd.isna(value):
+        return None
+    return value
+
+# Aplicar limpeza em cada registro
+cleaned_records = []
 for record in records:
-    for key, value in record.items():
-        if pd.isna(value) or (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
-            record[key] = None
+    cleaned_record = {key: clean_value(value) for key, value in record.items()}
+    cleaned_records.append(cleaned_record)
+
+records = cleaned_records
 
 print("Registros preparados para envio:", len(records))
+
+# Validar que o JSON é serializável
+try:
+    json.dumps(records)
+    print("✓ JSON validado com sucesso")
+except (ValueError, TypeError) as e:
+    print(f"Erro ao validar JSON: {e}")
+    sys.exit(1)
 
 # ===============================
 # LOAD SUPABASE

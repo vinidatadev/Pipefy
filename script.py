@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 
+# carregar variáveis do .env
 load_dotenv()
 
 pipefy_api_key = os.getenv("API_KEY")
@@ -41,8 +42,17 @@ query = """
 }
 """
 
+# ===============================
+# EXTRAÇÃO PIPEFY
+# ===============================
+
 response = requests.post(pipefy_url, json={"query": query}, headers=headers_pipefy)
 data = response.json()
+
+if "errors" in data:
+    print("Erro na API Pipefy")
+    print(data)
+    exit()
 
 rows = []
 
@@ -55,8 +65,8 @@ for card in data["data"]["allCards"]["edges"]:
         "titulo": node["title"],
         "criado_em": node["createdAt"],
         "finalizado_em": node["finished_at"],
-        "criador": node["createdBy"]["name"],
-        "fase_atual": node["current_phase"]["name"],
+        "criador": node["createdBy"]["name"] if node["createdBy"] else None,
+        "fase_atual": node["current_phase"]["name"] if node["current_phase"] else None,
         "causa_do_fca": None,
         "setor_responsavel": None,
         "area_causadora": None,
@@ -108,9 +118,21 @@ for card in data["data"]["allCards"]["edges"]:
 
 df = pd.DataFrame(rows)
 
+print("Dados extraídos do Pipefy:")
 print(df)
 
+# ===============================
+# TRATAMENTO
+# ===============================
+
+# converter NaN para None (JSON aceita null)
+df = df.where(pd.notnull(df), None)
+
 records = df.to_dict(orient="records")
+
+# ===============================
+# LOAD SUPABASE
+# ===============================
 
 endpoint = f"{supabase_url}/rest/v1/pipefy_cards"
 
@@ -127,5 +149,5 @@ response = requests.post(
     json=records
 )
 
-print(response.status_code)
-print(response.text)
+print("Status envio Supabase:", response.status_code)
+print("Resposta:", response.text)

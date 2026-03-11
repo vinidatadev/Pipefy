@@ -2,32 +2,33 @@ name: Pipefy ETL
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *" # roda a cada hora
-  workflow_dispatch:      # permite rodar manualmente
+    # "*/5 * * * *" significa: a cada 5 minutos de cada hora, dia e mês.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # Permite que você clique no botão "Run workflow" para testar agora
 
 jobs:
   run-etl:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Clonar repositório
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Instalar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Instalar dependências
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Criar .env
-        run: |
-          echo "API_KEY=${{ secrets.API_KEY }}" >> .env
-          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          echo "SUPABASE_API_KEY=${{ secrets.SUPABASE_API_KEY }}" >> .env
-
       - name: Rodar ETL
+        # Em vez de criar um arquivo .env, passamos as secrets direto para o ambiente do Python
+        # Isso é mais seguro e evita erros de leitura de arquivo no runner.
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
         run: python script.py

@@ -184,11 +184,24 @@ endpoint = f"{supabase_url}/rest/v1/pipefy_cards"
 headers_supabase = {
     "apikey": supabase_key,
     "Authorization": f"Bearer {supabase_key}",
-    "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates"
+    "Content-Type": "application/json"
 }
 
-print("Enviando para Supabase...")
+# Passo 1: Limpar a tabela
+print("Limpando tabela no Supabase...")
+
+delete_response = requests.delete(
+    f"{endpoint}?codigo=neq.0",  # Deleta todos os registros (codigo diferente de 0)
+    headers=headers_supabase
+)
+
+print(f"Limpeza - Status: {delete_response.status_code}")
+
+if delete_response.status_code not in [200, 204]:
+    print(f"Aviso: Erro ao limpar tabela - {delete_response.text}")
+
+# Passo 2: Inserir novos dados
+print("Inserindo novos dados no Supabase...")
 
 # Serializar manualmente o JSON para ter controle total
 json_payload = json.dumps(records, ensure_ascii=False)

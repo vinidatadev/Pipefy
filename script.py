@@ -2,13 +2,21 @@ import requests
 import pandas as pd
 import os
 from dotenv import load_dotenv
+import sys
 
-# carregar variáveis do .env
+# ===============================
+# CARREGAR VARIÁVEIS
+# ===============================
+
 load_dotenv()
 
 pipefy_api_key = os.getenv("API_KEY")
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_API_KEY")
+
+if not pipefy_api_key or not supabase_url or not supabase_key:
+    print("Erro: variáveis de ambiente não carregadas corretamente.")
+    sys.exit(1)
 
 pipefy_url = "https://api.pipefy.com/graphql"
 
@@ -16,6 +24,10 @@ headers_pipefy = {
     "Authorization": f"Bearer {pipefy_api_key}",
     "Content-Type": "application/json"
 }
+
+# ===============================
+# QUERY PIPEFY
+# ===============================
 
 query = """
 {
@@ -46,13 +58,20 @@ query = """
 # EXTRAÇÃO PIPEFY
 # ===============================
 
+print("Consultando API Pipefy...")
+
 response = requests.post(pipefy_url, json={"query": query}, headers=headers_pipefy)
+
+if response.status_code != 200:
+    print("Erro HTTP na API Pipefy:", response.status_code)
+    sys.exit(1)
+
 data = response.json()
 
 if "errors" in data:
-    print("Erro na API Pipefy")
+    print("Erro retornado pela API Pipefy:")
     print(data)
-    exit()
+    sys.exit(1)
 
 rows = []
 
@@ -65,8 +84,8 @@ for card in data["data"]["allCards"]["edges"]:
         "titulo": node["title"],
         "criado_em": node["createdAt"],
         "finalizado_em": node["finished_at"],
-        "criador": node["createdBy"]["name"] if node["createdBy"] else None,
-        "fase_atual": node["current_phase"]["name"] if node["current_phase"] else None,
+        "criador": node["createdBy"]["name"] if node.get("createdBy") else None,
+        "fase_atual": node["current_phase"]["name"] if node.get("current_phase") else None,
         "causa_do_fca": None,
         "setor_responsavel": None,
         "area_causadora": None,
@@ -116,19 +135,19 @@ for card in data["data"]["allCards"]["edges"]:
 
     rows.append(row)
 
+# ===============================
+# TRANSFORM
+# ===============================
+
 df = pd.DataFrame(rows)
 
-print("Dados extraídos do Pipefy:")
+print("Dados extraídos:")
 print(df)
 
-# ===============================
-# TRATAMENTO
-# ===============================
+# converter NaN -> None (JSON válido)
+records = df.astype(object).where(pd.notnull(df), None).to_dict(orient="records")
 
-# converter NaN para None (JSON aceita null)
-df = df.where(pd.notnull(df), None)
-
-records = df.to_dict(orient="records")
+print("Total de registros:", len(records))
 
 # ===============================
 # LOAD SUPABASE
@@ -143,11 +162,20 @@ headers_supabase = {
     "Prefer": "resolution=merge-duplicates"
 }
 
+print("Enviando dados para Supabase...")
+
 response = requests.post(
     endpoint,
     headers=headers_supabase,
     json=records
 )
 
-print("Status envio Supabase:", response.status_code)
+print("Status envio:", response.status_code)
 print("Resposta:", response.text)
+
+if response.status_code not in [200, 201]:
+    print("Erro ao enviar para Supabase.")
+    sys.exit(1)
+
+print("ETL finalizado com sucesso!")
+

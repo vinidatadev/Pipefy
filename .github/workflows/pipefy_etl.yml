@@ -2,7 +2,7 @@ name: Pipefy ETL
 
 on:
   schedule:
-    - cron: "0 * * * *"   # roda a cada hora
+    - cron: "*/5 * * * *"   # roda a cada hora
   workflow_dispatch:      # permite rodar manualmente
 
 jobs:

@@ -1,0 +1,16 @@
+# variáveis sensíveis
+.env
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ambientes virtuais
+venv/
+.env/
+
+# arquivos locais
+*.xlsx
+*.csv

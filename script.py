@@ -15,7 +15,7 @@ supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_API_KEY")
 
 if not pipefy_api_key or not supabase_url or not supabase_key:
-    print("Erro: variáveis de ambiente não carregadas corretamente.")
+    print("Erro: variáveis de ambiente não carregadas.")
     sys.exit(1)
 
 pipefy_url = "https://api.pipefy.com/graphql"
@@ -63,7 +63,7 @@ print("Consultando API Pipefy...")
 response = requests.post(pipefy_url, json={"query": query}, headers=headers_pipefy)
 
 if response.status_code != 200:
-    print("Erro HTTP na API Pipefy:", response.status_code)
+    print("Erro HTTP Pipefy:", response.status_code)
     sys.exit(1)
 
 data = response.json()
@@ -99,37 +99,27 @@ for card in data["data"]["allCards"]["edges"]:
     }
 
     for field in node["fields"]:
-
         nome = field["name"]
         valor = field["value"]
 
         if nome == "Causa do FCA":
             row["causa_do_fca"] = valor
-
         elif nome == "Setor Responsavel":
             row["setor_responsavel"] = valor
-
         elif nome == "Área causadora":
             row["area_causadora"] = valor
-
         elif nome == "Ação":
             row["acao"] = valor
-
         elif nome == "UF":
             row["uf"] = valor
-
         elif nome == "Número da Remessa":
             row["numero_da_remessa"] = valor
-
         elif nome == "Empresa":
             row["empresa"] = valor
-
         elif nome == "Detalhe/Observação":
             row["detalhe_observacao"] = valor
-
         elif nome == "1. Problema Solucionado?":
             row["problema_solucionado"] = valor
-
         elif nome == "2.Detalhe/Devolutiva da Tratativa":
             row["detalhe_devolutiva_tratativa"] = valor
 
@@ -141,13 +131,17 @@ for card in data["data"]["allCards"]["edges"]:
 
 df = pd.DataFrame(rows)
 
-print("Dados extraídos:")
+print("Dados extraídos do Pipefy:")
 print(df)
 
-# converter NaN -> None (JSON válido)
-records = df.astype(object).where(pd.notnull(df), None).to_dict(orient="records")
+# 🚨 CORREÇÃO DEFINITIVA DO ERRO JSON
+df = df.replace({pd.NA: None})
+df = df.where(pd.notnull(df), None)
+df = df.fillna(value=None)
 
-print("Total de registros:", len(records))
+records = df.to_dict(orient="records")
+
+print("Registros preparados para envio:", len(records))
 
 # ===============================
 # LOAD SUPABASE
@@ -162,7 +156,7 @@ headers_supabase = {
     "Prefer": "resolution=merge-duplicates"
 }
 
-print("Enviando dados para Supabase...")
+print("Enviando para Supabase...")
 
 response = requests.post(
     endpoint,
@@ -170,12 +164,11 @@ response = requests.post(
     json=records
 )
 
-print("Status envio:", response.status_code)
+print("Status:", response.status_code)
 print("Resposta:", response.text)
 
 if response.status_code not in [200, 201]:
-    print("Erro ao enviar para Supabase.")
+    print("Erro ao enviar dados.")
     sys.exit(1)
 
-print("ETL finalizado com sucesso!")
-
+print("ETL executado com sucesso!")

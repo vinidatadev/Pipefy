@@ -6,6 +6,13 @@ import sys
 import numpy as np
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ===============================
+# CONFIG
+# ===============================
+
+MAX_WORKERS = 10  # número de requisições paralelas
 
 # ===============================
 # CARREGAR VARIÁVEIS
@@ -27,6 +34,42 @@ headers_pipefy = {
     "Authorization": f"Bearer {pipefy_api_key}",
     "Content-Type": "application/json"
 }
+
+# ===============================
+# FUNÇÃO GERAR LINK PUBLICO
+# ===============================
+
+def gerar_link_publico(card_id):
+
+    mutation = f"""
+    mutation {{
+      configurePublicPhaseFormLink(
+        input: {{
+          cardId: "{card_id}"
+          enable: true
+        }}
+      ) {{
+        url
+      }}
+    }}
+    """
+
+    try:
+
+        response = requests.post(
+            pipefy_url,
+            headers=headers_pipefy,
+            json={"query": mutation},
+            timeout=15
+        )
+
+        data = response.json()
+
+        return data["data"]["configurePublicPhaseFormLink"]["url"]
+
+    except:
+        return None
+
 
 # ===============================
 # QUERY PIPEFY
@@ -57,13 +100,13 @@ query = """
 }
 """
 
-# ===============================
-# EXTRAÇÃO PIPEFY
-# ===============================
-
 print("Consultando API Pipefy...")
 
-response = requests.post(pipefy_url, json={"query": query}, headers=headers_pipefy)
+response = requests.post(
+    pipefy_url,
+    json={"query": query},
+    headers=headers_pipefy
+)
 
 if response.status_code != 200:
     print("Erro HTTP Pipefy:", response.status_code)
@@ -76,19 +119,56 @@ if "errors" in data:
     print(data)
     sys.exit(1)
 
+cards = data["data"]["allCards"]["edges"]
+
+print(f"{len(cards)} cards encontrados")
+
+# ===============================
+# GERAR LINKS EM PARALELO
+# ===============================
+
+print("Gerando links públicos...")
+
+card_links = {}
+
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+
+    futures = {
+        executor.submit(gerar_link_publico, card["node"]["id"]): card["node"]["id"]
+        for card in cards
+    }
+
+    for future in as_completed(futures):
+
+        card_id = futures[future]
+
+        try:
+            link = future.result()
+        except:
+            link = None
+
+        card_links[card_id] = link
+
+
+# ===============================
+# EXTRAÇÃO
+# ===============================
+
 rows = []
 
-for card in data["data"]["allCards"]["edges"]:
+for card in cards:
 
     node = card["node"]
+    card_id = node["id"]
 
     row = {
-        "codigo": node["id"],
+        "codigo": card_id,
         "titulo": node["title"],
         "criado_em": node["createdAt"],
         "finalizado_em": node["finished_at"],
         "criador": node["createdBy"]["name"] if node.get("createdBy") else None,
         "fase_atual": node["current_phase"]["name"] if node.get("current_phase") else None,
+        "link_publico_card": card_links.get(card_id),
         "causa_do_fca": None,
         "setor_responsavel": None,
         "area_causadora": None,
@@ -102,6 +182,7 @@ for card in data["data"]["allCards"]["edges"]:
     }
 
     for field in node["fields"]:
+
         nome = field["name"]
         valor = field["value"]
 
@@ -134,46 +215,49 @@ for card in data["data"]["allCards"]["edges"]:
 
 df = pd.DataFrame(rows)
 
-# Adicionar coluna de data/hora de atualização
 data_atualizacao = datetime.now().isoformat()
-df['atualizado_em'] = data_atualizacao
+df["atualizado_em"] = data_atualizacao
 
 print("Dados extraídos do Pipefy:")
 print(df)
 
-# 🚨 CORREÇÃO DEFINITIVA DO ERRO JSON
-# Converter para dicionário primeiro
+# ===============================
+# LIMPEZA JSON
+# ===============================
+
 records = df.to_dict(orient="records")
 
-# Limpar TODOS os valores problemáticos manualmente
 def clean_value(value):
-    """Remove NaN, inf e outros valores não serializáveis"""
+
     if value is None:
         return None
+
     if isinstance(value, float):
+
         if np.isnan(value) or np.isinf(value):
             return None
+
     if pd.isna(value):
         return None
+
     return value
 
-# Aplicar limpeza em cada registro
+
 cleaned_records = []
+
 for record in records:
+
     cleaned_record = {key: clean_value(value) for key, value in record.items()}
+
     cleaned_records.append(cleaned_record)
 
 records = cleaned_records
 
-print("Registros preparados para envio:", len(records))
+print("Registros preparados:", len(records))
 
-# Validar que o JSON é serializável
-try:
-    json.dumps(records)
-    print("✓ JSON validado com sucesso")
-except (ValueError, TypeError) as e:
-    print(f"Erro ao validar JSON: {e}")
-    sys.exit(1)
+# validar json
+
+json.dumps(records)
 
 # ===============================
 # LOAD SUPABASE
@@ -187,36 +271,26 @@ headers_supabase = {
     "Content-Type": "application/json"
 }
 
-# Passo 1: Limpar a tabela
-print("Limpando tabela no Supabase...")
+print("Limpando tabela...")
 
-delete_response = requests.delete(
-    f"{endpoint}?codigo=neq.0",  # Deleta todos os registros (codigo diferente de 0)
+requests.delete(
+    f"{endpoint}?codigo=neq.0",
     headers=headers_supabase
 )
 
-print(f"Limpeza - Status: {delete_response.status_code}")
-
-if delete_response.status_code not in [200, 204]:
-    print(f"Aviso: Erro ao limpar tabela - {delete_response.text}")
-
-# Passo 2: Inserir novos dados
-print("Inserindo novos dados no Supabase...")
-
-# Serializar manualmente o JSON para ter controle total
-json_payload = json.dumps(records, ensure_ascii=False)
+print("Inserindo dados...")
 
 response = requests.post(
     endpoint,
     headers=headers_supabase,
-    data=json_payload
+    data=json.dumps(records, ensure_ascii=False)
 )
 
 print("Status:", response.status_code)
-print("Resposta:", response.text)
 
 if response.status_code not in [200, 201]:
-    print("Erro ao enviar dados.")
+
+    print("Erro:", response.text)
     sys.exit(1)
 
 print("ETL executado com sucesso!")

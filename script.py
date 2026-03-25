@@ -71,7 +71,7 @@ def gerar_link_publico(card_id):
 
 
 # ===============================
-# PAGINAÇÃO PIPEFY
+# PAGINAÇÃO 100% SEGURA
 # ===============================
 
 def buscar_todos_cards():
@@ -82,45 +82,82 @@ def buscar_todos_cards():
 
     while has_next_page:
 
-        # Só adiciona "after" se existir cursor
-        after_param = f', after: "{cursor}"' if cursor else ""
-
-        query = f"""
-        {{
-          allCards(pipeId: 306963265{after_param}) {{
-            pageInfo {{
-              hasNextPage
-              endCursor
-            }}
-            edges {{
-              node {{
-                id
-                title
-                createdAt
-                finished_at
-                createdBy {{
-                  name
-                }}
-                current_phase {{
-                  name
-                }}
-                phases_history {{
-                  phase {{
+        if cursor is None:
+            # PRIMEIRA QUERY (SEM AFTER)
+            query = """
+            {
+              allCards(pipeId: 306963265) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                edges {
+                  node {
                     id
-                    name
-                  }}
-                  firstTimeIn
-                  lastTimeOut
+                    title
+                    createdAt
+                    finished_at
+                    createdBy {
+                      name
+                    }
+                    current_phase {
+                      name
+                    }
+                    phases_history {
+                      phase {
+                        id
+                        name
+                      }
+                      firstTimeIn
+                      lastTimeOut
+                    }
+                    fields {
+                      name
+                      value
+                    }
+                  }
+                }
+              }
+            }
+            """
+        else:
+            # PRÓXIMAS QUERIES (COM AFTER)
+            query = f"""
+            {{
+              allCards(pipeId: 306963265, after: "{cursor}") {{
+                pageInfo {{
+                  hasNextPage
+                  endCursor
                 }}
-                fields {{
-                  name
-                  value
+                edges {{
+                  node {{
+                    id
+                    title
+                    createdAt
+                    finished_at
+                    createdBy {{
+                      name
+                    }}
+                    current_phase {{
+                      name
+                    }}
+                    phases_history {{
+                      phase {{
+                        id
+                        name
+                      }}
+                      firstTimeIn
+                      lastTimeOut
+                    }}
+                    fields {{
+                      name
+                      value
+                    }}
+                  }}
                 }}
               }}
             }}
-          }}
-        }}
-        """
+            """
 
         response = requests.post(
             pipefy_url,
@@ -221,7 +258,6 @@ for card in cards:
         "detalhe_devolutiva_tratativa": None
     }
 
-    # campos customizados
     for field in node["fields"]:
 
         nome = field["name"]
@@ -250,7 +286,6 @@ for card in cards:
 
     rows.append(row)
 
-    # HISTÓRICO DE FASES
     for ph in node.get("phases_history", []):
 
         entrada = ph.get("firstTimeIn")
@@ -292,11 +327,8 @@ df["atualizado_em"] = data_atualizacao
 
 df_phases = pd.DataFrame(phases_rows)
 
-print("Dados cards:")
-print(df)
-
-print("Dados fases:")
-print(df_phases)
+print("Total cards:", len(df))
+print("Total fases:", len(df_phases))
 
 # ===============================
 # LIMPEZA
@@ -320,9 +352,6 @@ def clean_value(value):
 records = [{k: clean_value(v) for k, v in r.items()} for r in df.to_dict(orient="records")]
 phases_records = [{k: clean_value(v) for k, v in r.items()} for r in df_phases.to_dict(orient="records")]
 
-json.dumps(records)
-json.dumps(phases_records)
-
 # ===============================
 # LOAD SUPABASE
 # ===============================
@@ -336,20 +365,16 @@ headers_supabase = {
     "Content-Type": "application/json"
 }
 
-# limpa cards
 print("Limpando tabela cards...")
 requests.delete(f"{endpoint_cards}?codigo=neq.0", headers=headers_supabase)
 
-# insere cards
 print("Inserindo cards...")
 resp1 = requests.post(endpoint_cards, headers=headers_supabase, data=json.dumps(records, ensure_ascii=False))
 print("Status cards:", resp1.status_code)
 
-# limpa fases
 print("Limpando tabela fases...")
 requests.delete(f"{endpoint_phases}?card_id=neq.0", headers=headers_supabase)
 
-# insere fases
 print("Inserindo fases...")
 resp2 = requests.post(endpoint_phases, headers=headers_supabase, data=json.dumps(phases_records, ensure_ascii=False))
 print("Status fases:", resp2.status_code)

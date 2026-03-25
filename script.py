@@ -71,64 +71,90 @@ def gerar_link_publico(card_id):
 
 
 # ===============================
-# QUERY (COM HISTÓRICO)
+# PAGINAÇÃO PIPEFY (AJUSTE AQUI)
 # ===============================
 
-query = """
-{
-  allCards(pipeId: 306963265) {
-    edges {
-      node {
-        id
-        title
-        createdAt
-        finished_at
-        createdBy {
-          name
-        }
-        current_phase {
-          name
-        }
+def buscar_todos_cards():
 
-        phases_history {
-          phase {
-            id
-            name
-          }
-          firstTimeIn
-          lastTimeOut
-        }
+    all_cards = []
+    cursor = None
+    has_next_page = True
 
-        fields {
-          name
-          value
-        }
-      }
-    }
-  }
-}
-"""
+    while has_next_page:
 
-print("Consultando API Pipefy...")
+        query = f"""
+        {{
+          allCards(pipeId: 306963265, after: {f'"{cursor}"' if cursor else None}) {{
+            pageInfo {{
+              hasNextPage
+              endCursor
+            }}
+            edges {{
+              node {{
+                id
+                title
+                createdAt
+                finished_at
+                createdBy {{
+                  name
+                }}
+                current_phase {{
+                  name
+                }}
+                phases_history {{
+                  phase {{
+                    id
+                    name
+                  }}
+                  firstTimeIn
+                  lastTimeOut
+                }}
+                fields {{
+                  name
+                  value
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
 
-response = requests.post(
-    pipefy_url,
-    json={"query": query},
-    headers=headers_pipefy
-)
+        response = requests.post(
+            pipefy_url,
+            json={"query": query},
+            headers=headers_pipefy
+        )
 
-if response.status_code != 200:
-    print("Erro HTTP Pipefy:", response.status_code)
-    sys.exit(1)
+        if response.status_code != 200:
+            print("Erro HTTP Pipefy:", response.status_code)
+            sys.exit(1)
 
-data = response.json()
+        data = response.json()
 
-if "errors" in data:
-    print("Erro retornado pela API Pipefy:")
-    print(data)
-    sys.exit(1)
+        if "errors" in data:
+            print("Erro retornado pela API Pipefy:")
+            print(data)
+            sys.exit(1)
 
-cards = data["data"]["allCards"]["edges"]
+        result = data["data"]["allCards"]
+
+        all_cards.extend(result["edges"])
+
+        has_next_page = result["pageInfo"]["hasNextPage"]
+        cursor = result["pageInfo"]["endCursor"]
+
+        print(f"Página carregada | Total acumulado: {len(all_cards)}")
+
+    return all_cards
+
+
+# ===============================
+# EXECUÇÃO
+# ===============================
+
+print("Consultando API Pipefy com paginação...")
+
+cards = buscar_todos_cards()
 
 print(f"{len(cards)} cards encontrados")
 
@@ -221,10 +247,7 @@ for card in cards:
 
     rows.append(row)
 
-    # ===============================
-    # HISTÓRICO DE FASES
-    # ===============================
-
+    # HISTÓRICO
     for ph in node.get("phases_history", []):
 
         entrada = ph.get("firstTimeIn")
@@ -310,20 +333,16 @@ headers_supabase = {
     "Content-Type": "application/json"
 }
 
-# limpa cards
 print("Limpando tabela cards...")
 requests.delete(f"{endpoint_cards}?codigo=neq.0", headers=headers_supabase)
 
-# insere cards
 print("Inserindo cards...")
 resp1 = requests.post(endpoint_cards, headers=headers_supabase, data=json.dumps(records, ensure_ascii=False))
 print("Status cards:", resp1.status_code)
 
-# limpa fases
 print("Limpando tabela fases...")
 requests.delete(f"{endpoint_phases}?card_id=neq.0", headers=headers_supabase)
 
-# insere fases
 print("Inserindo fases...")
 resp2 = requests.post(endpoint_phases, headers=headers_supabase, data=json.dumps(phases_records, ensure_ascii=False))
 print("Status fases:", resp2.status_code)

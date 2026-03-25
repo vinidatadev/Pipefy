@@ -71,7 +71,7 @@ def gerar_link_publico(card_id):
 
 
 # ===============================
-# PAGINAÇÃO PIPEFY (AJUSTE AQUI)
+# PAGINAÇÃO PIPEFY
 # ===============================
 
 def buscar_todos_cards():
@@ -82,9 +82,12 @@ def buscar_todos_cards():
 
     while has_next_page:
 
+        # Só adiciona "after" se existir cursor
+        after_param = f', after: "{cursor}"' if cursor else ""
+
         query = f"""
         {{
-          allCards(pipeId: 306963265, after: {f'"{cursor}"' if cursor else None}) {{
+          allCards(pipeId: 306963265{after_param}) {{
             pageInfo {{
               hasNextPage
               endCursor
@@ -247,7 +250,7 @@ for card in cards:
 
     rows.append(row)
 
-    # HISTÓRICO
+    # HISTÓRICO DE FASES
     for ph in node.get("phases_history", []):
 
         entrada = ph.get("firstTimeIn")
@@ -333,16 +336,20 @@ headers_supabase = {
     "Content-Type": "application/json"
 }
 
+# limpa cards
 print("Limpando tabela cards...")
 requests.delete(f"{endpoint_cards}?codigo=neq.0", headers=headers_supabase)
 
+# insere cards
 print("Inserindo cards...")
 resp1 = requests.post(endpoint_cards, headers=headers_supabase, data=json.dumps(records, ensure_ascii=False))
 print("Status cards:", resp1.status_code)
 
+# limpa fases
 print("Limpando tabela fases...")
 requests.delete(f"{endpoint_phases}?card_id=neq.0", headers=headers_supabase)
 
+# insere fases
 print("Inserindo fases...")
 resp2 = requests.post(endpoint_phases, headers=headers_supabase, data=json.dumps(phases_records, ensure_ascii=False))
 print("Status fases:", resp2.status_code)

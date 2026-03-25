@@ -12,10 +12,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # CONFIG
 # ===============================
 
-MAX_WORKERS = 10  # número de requisições paralelas
+MAX_WORKERS = 10
 
 # ===============================
-# CARREGAR VARIÁVEIS
+# VARIÁVEIS
 # ===============================
 
 load_dotenv()
@@ -36,7 +36,7 @@ headers_pipefy = {
 }
 
 # ===============================
-# FUNÇÃO GERAR LINK PUBLICO
+# FUNÇÃO LINK PUBLICO
 # ===============================
 
 def gerar_link_publico(card_id):
@@ -55,7 +55,6 @@ def gerar_link_publico(card_id):
     """
 
     try:
-
         response = requests.post(
             pipefy_url,
             headers=headers_pipefy,
@@ -72,7 +71,7 @@ def gerar_link_publico(card_id):
 
 
 # ===============================
-# QUERY PIPEFY
+# QUERY (COM HISTÓRICO)
 # ===============================
 
 query = """
@@ -90,6 +89,16 @@ query = """
         current_phase {
           name
         }
+
+        phases_history {
+          phase {
+            id
+            name
+          }
+          firstTimeIn
+          lastTimeOut
+        }
+
         fields {
           name
           value
@@ -124,7 +133,7 @@ cards = data["data"]["allCards"]["edges"]
 print(f"{len(cards)} cards encontrados")
 
 # ===============================
-# GERAR LINKS EM PARALELO
+# LINKS
 # ===============================
 
 print("Gerando links públicos...")
@@ -149,12 +158,14 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
         card_links[card_id] = link
 
-
 # ===============================
 # EXTRAÇÃO
 # ===============================
 
 rows = []
+phases_rows = []
+
+data_atualizacao = datetime.now().isoformat()
 
 for card in cards:
 
@@ -181,6 +192,7 @@ for card in cards:
         "detalhe_devolutiva_tratativa": None
     }
 
+    # campos customizados
     for field in node["fields"]:
 
         nome = field["name"]
@@ -209,23 +221,60 @@ for card in cards:
 
     rows.append(row)
 
+    # ===============================
+    # HISTÓRICO DE FASES
+    # ===============================
+
+    for ph in node.get("phases_history", []):
+
+        entrada = ph.get("firstTimeIn")
+        saida = ph.get("lastTimeOut")
+
+        tempo_segundos = None
+        tempo_horas = None
+
+        if entrada and saida:
+            try:
+                dt_entrada = datetime.fromisoformat(entrada.replace("Z", "+00:00"))
+                dt_saida = datetime.fromisoformat(saida.replace("Z", "+00:00"))
+
+                diff = (dt_saida - dt_entrada).total_seconds()
+
+                tempo_segundos = diff
+                tempo_horas = diff / 3600
+
+            except:
+                pass
+
+        phases_rows.append({
+            "card_id": card_id,
+            "fase_id": ph["phase"]["id"] if ph.get("phase") else None,
+            "fase_nome": ph["phase"]["name"] if ph.get("phase") else None,
+            "entrada_fase": entrada,
+            "saida_fase": saida,
+            "tempo_segundos": tempo_segundos,
+            "tempo_horas": tempo_horas,
+            "atualizado_em": data_atualizacao
+        })
+
 # ===============================
-# TRANSFORM
+# DATAFRAMES
 # ===============================
 
 df = pd.DataFrame(rows)
-
-data_atualizacao = datetime.now().isoformat()
 df["atualizado_em"] = data_atualizacao
 
-print("Dados extraídos do Pipefy:")
+df_phases = pd.DataFrame(phases_rows)
+
+print("Dados cards:")
 print(df)
 
-# ===============================
-# LIMPEZA JSON
-# ===============================
+print("Dados fases:")
+print(df_phases)
 
-records = df.to_dict(orient="records")
+# ===============================
+# LIMPEZA
+# ===============================
 
 def clean_value(value):
 
@@ -233,7 +282,6 @@ def clean_value(value):
         return None
 
     if isinstance(value, float):
-
         if np.isnan(value) or np.isinf(value):
             return None
 
@@ -243,27 +291,18 @@ def clean_value(value):
     return value
 
 
-cleaned_records = []
-
-for record in records:
-
-    cleaned_record = {key: clean_value(value) for key, value in record.items()}
-
-    cleaned_records.append(cleaned_record)
-
-records = cleaned_records
-
-print("Registros preparados:", len(records))
-
-# validar json
+records = [{k: clean_value(v) for k, v in r.items()} for r in df.to_dict(orient="records")]
+phases_records = [{k: clean_value(v) for k, v in r.items()} for r in df_phases.to_dict(orient="records")]
 
 json.dumps(records)
+json.dumps(phases_records)
 
 # ===============================
 # LOAD SUPABASE
 # ===============================
 
-endpoint = f"{supabase_url}/rest/v1/pipefy_cards"
+endpoint_cards = f"{supabase_url}/rest/v1/pipefy_cards"
+endpoint_phases = f"{supabase_url}/rest/v1/pipefy_cards_fases"
 
 headers_supabase = {
     "apikey": supabase_key,
@@ -271,26 +310,30 @@ headers_supabase = {
     "Content-Type": "application/json"
 }
 
-print("Limpando tabela...")
+# limpa cards
+print("Limpando tabela cards...")
+requests.delete(f"{endpoint_cards}?codigo=neq.0", headers=headers_supabase)
 
-requests.delete(
-    f"{endpoint}?codigo=neq.0",
-    headers=headers_supabase
-)
+# insere cards
+print("Inserindo cards...")
+resp1 = requests.post(endpoint_cards, headers=headers_supabase, data=json.dumps(records, ensure_ascii=False))
+print("Status cards:", resp1.status_code)
 
-print("Inserindo dados...")
+# limpa fases
+print("Limpando tabela fases...")
+requests.delete(f"{endpoint_phases}?card_id=neq.0", headers=headers_supabase)
 
-response = requests.post(
-    endpoint,
-    headers=headers_supabase,
-    data=json.dumps(records, ensure_ascii=False)
-)
+# insere fases
+print("Inserindo fases...")
+resp2 = requests.post(endpoint_phases, headers=headers_supabase, data=json.dumps(phases_records, ensure_ascii=False))
+print("Status fases:", resp2.status_code)
 
-print("Status:", response.status_code)
+if resp1.status_code not in [200, 201]:
+    print("Erro cards:", resp1.text)
+    sys.exit(1)
 
-if response.status_code not in [200, 201]:
-
-    print("Erro:", response.text)
+if resp2.status_code not in [200, 201]:
+    print("Erro fases:", resp2.text)
     sys.exit(1)
 
 print("ETL executado com sucesso!")
